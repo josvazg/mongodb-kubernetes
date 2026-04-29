@@ -2,13 +2,17 @@ package cli
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/spf13/cobra"
 
 	"github.com/mongodb/mongodb-kubernetes/internal/ci/release"
 )
 
-const buildInfoPath = "build_info.json"
+const (
+	buildInfoPath          = "build_info.json"
+	defaultDockerfilesDest = "public/dockerfiles"
+)
 
 func newReleaseDockerfilesCmd() *cobra.Command {
 	var (
@@ -31,13 +35,22 @@ copied to both mongodb-kubernetes-init-database and mongodb-kubernetes-init-appd
 		},
 	}
 	cmd.Flags().StringVar(&version, "version", "", "release version (required), e.g. 1.8.1")
-	cmd.Flags().StringVar(&dest, "dest", "public/dockerfiles", "target root directory")
+	cmd.Flags().StringVar(&dest, "dest", defaultDockerfilesDest, "target root directory")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print actions without writing files")
 	_ = cmd.MarkFlagRequired("version")
 	return cmd
 }
 
 func runReleaseDockerfilesCmd(cmd *cobra.Command, version, dest string, dryRun bool) error {
+	return copyDockerfilesPlanned(cmd.ErrOrStderr(), version, dest, dryRun)
+}
+
+// verifyDockerfileSources reads build_info.json, builds the copy plan, and
+// stat()s every source. Used by `release pr` as a pre-flight before any
+// worktree changes — catches the common "agent / ops-manager Dockerfile
+// wasn't copied from the OM-bump commit yet" case before bump leaves the
+// worktree dirty.
+func verifyDockerfileSources(out io.Writer, version, dest string) error {
 	bi, err := release.ReadBuildInfo(buildInfoPath)
 	if err != nil {
 		return err
@@ -49,8 +62,25 @@ func runReleaseDockerfilesCmd(cmd *cobra.Command, version, dest string, dryRun b
 	if err := release.VerifyDockerfileSources(plan); err != nil {
 		return err
 	}
+	fmt.Fprintf(out, "→ verified %d source Dockerfile(s) exist for version %s\n", len(plan), version)
+	return nil
+}
 
-	out := cmd.ErrOrStderr()
+// copyDockerfilesPlanned plans + copies the release Dockerfiles, logging each
+// step to out. Shared by `release dockerfiles` (cmd) and `release pr` (orchestrator)
+// so the same logging and dry-run semantics apply in both contexts.
+func copyDockerfilesPlanned(out io.Writer, version, dest string, dryRun bool) error {
+	bi, err := release.ReadBuildInfo(buildInfoPath)
+	if err != nil {
+		return err
+	}
+	plan, err := release.PlanDockerfileCopies(bi, version, dest)
+	if err != nil {
+		return err
+	}
+	if err := release.VerifyDockerfileSources(plan); err != nil {
+		return err
+	}
 	prefix := "→ copy"
 	if dryRun {
 		prefix = "[dry-run] would copy"
@@ -58,13 +88,11 @@ func runReleaseDockerfilesCmd(cmd *cobra.Command, version, dest string, dryRun b
 	for _, p := range plan {
 		fmt.Fprintf(out, "%s %s -> %s\n", prefix, p.Src, p.Dst)
 	}
-
 	if !dryRun {
 		if err := release.CopyDockerfiles(plan); err != nil {
 			return err
 		}
 	}
-
 	verb := "copied"
 	if dryRun {
 		verb = "would copy"

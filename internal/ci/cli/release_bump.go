@@ -44,19 +44,23 @@ func runReleaseBumpCmd(ctx context.Context, version string, dryRun bool) error {
 		return fmt.Errorf("getwd: %w", err)
 	}
 	r := runner.New(dryRun, cwd)
-	return bumpCore(ctx, r, version)
-}
 
-// bumpCore is the shared core for `release bump` and `release pr`. It
-// validates preconditions, rewrites release.json, regenerates artifacts via a
-// fix-up pass of `make precommit-full`, commits the result, and re-runs
-// precommit-full as an idempotency check (must exit clean and produce no
-// further changes). On success the current branch has a new "Release MCK
-// <version>" commit ready to push.
-func bumpCore(ctx context.Context, r *runner.Runner, version string) error {
 	if err := preflightFromGit(ctx, r, version); err != nil {
 		return err
 	}
+	if err := bumpFiles(ctx, r, version); err != nil {
+		return err
+	}
+	return commitAndVerify(ctx, r, version)
+}
+
+// bumpFiles is the worktree-modifying half of a release bump: rewrite
+// release.json and run the precommit-full fix-up pass. Caller is responsible
+// for preflight (`preflightFromGit`) and for committing + verifying via
+// `commitAndVerify`. Splitting it this way lets `release pr` interleave
+// dockerfile copies between the worktree changes and the commit so everything
+// lands in a single "Release MCK <version>" commit.
+func bumpFiles(ctx context.Context, r *runner.Runner, version string) error {
 	if err := bumpReleaseJSON(r, version); err != nil {
 		return err
 	}
@@ -65,6 +69,14 @@ func bumpCore(ctx context.Context, r *runner.Runner, version string) error {
 	if err := r.Exec(ctx, "make", "precommit-full"); err != nil {
 		fmt.Fprintf(r.LogOut, "→ make precommit-full pass 1 exited non-zero (expected fix-up): %v\n", err)
 	}
+	return nil
+}
+
+// commitAndVerify commits the current worktree as "Release MCK <version>" and
+// runs the precommit-full idempotency check (must exit clean AND leave the
+// worktree clean against the new commit). On success the branch has one new
+// release commit ready to push.
+func commitAndVerify(ctx context.Context, r *runner.Runner, version string) error {
 	if err := commitReleaseChanges(ctx, r, version); err != nil {
 		return err
 	}

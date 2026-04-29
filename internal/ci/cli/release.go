@@ -16,5 +16,6 @@ func newReleaseCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newReleaseBumpCmd())
 	cmd.AddCommand(newReleaseDockerfilesCmd())
+	cmd.AddCommand(newReleasePRCmd())
 	return cmd
 }
