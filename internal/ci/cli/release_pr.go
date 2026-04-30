@@ -34,7 +34,11 @@ func newReleasePRCmd() *cobra.Command {
   7. gh pr create
 
 By default the PR targets the same GitHub repo as origin (so a fork's origin
-yields a fork-internal PR). Use --repo owner/repo to override.`,
+yields a fork-internal PR). Use --repo owner/repo to override.
+
+The PR is opened with the 'skip-changelog' label: release PRs aggregate
+existing changelog entries (segmented by the previous version tag) and don't
+add new ones themselves.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runReleasePRCmd(cmd.Context(), version, draft, dryRun, repoOverride)
 		},
@@ -107,6 +111,7 @@ func runReleasePRCmd(ctx context.Context, version string, draft, dryRun bool, re
 		"--head", headOwner + ":" + branch,
 		"--title", release.PRTitle(version),
 		"--body", body,
+		"--label", "skip-changelog",
 	}
 	if draft {
 		ghArgs = append(ghArgs, "--draft")
