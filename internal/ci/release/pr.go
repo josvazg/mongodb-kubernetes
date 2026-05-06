@@ -73,8 +73,9 @@ var DefaultReleasedImages = []string{
 }
 
 // PROpener branches, commits, pushes, and opens a pull request, returning its URL.
+// filesToStage is the list of repo-root-relative paths to include in the commit.
 type PROpener interface {
-	Open(repoRoot, branch, title, body string) (prURL string, err error)
+	Open(repoRoot, branch, title, body string, filesToStage []string) (prURL string, err error)
 }
 
 // PRInputs are the parameters for a release PR operation.
@@ -138,14 +139,19 @@ func ReleasePR(inputs PRInputs, opener PROpener) (string, error) {
 		return "", fmt.Errorf("update release.json: %w", err)
 	}
 
+	filesToStage := append([]string{"release.json"}, DockerfileDests(inputs.Version)...)
+
 	if !inputs.DryRun {
 		if err := os.WriteFile(releaseJSONPath, updated, 0o644); err != nil {
 			return "", fmt.Errorf("write release.json: %w", err)
+		}
+		if err := CopyDockerfiles(repoRoot, inputs.Version); err != nil {
+			return "", fmt.Errorf("copy dockerfiles: %w", err)
 		}
 	}
 
 	branch := "release-" + inputs.Version
 	title := "Release " + inputs.Version
 	body := fmt.Sprintf("Adds operator version %s to `release.json` supported image lists.", inputs.Version)
-	return opener.Open(repoRoot, branch, title, body)
+	return opener.Open(repoRoot, branch, title, body, filesToStage)
 }

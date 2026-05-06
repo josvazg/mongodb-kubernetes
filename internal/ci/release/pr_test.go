@@ -22,7 +22,7 @@ type prOpenCall struct {
 	repoRoot, branch, title, body string
 }
 
-func (f *fakePROpener) Open(repoRoot, branch, title, body string) (string, error) {
+func (f *fakePROpener) Open(repoRoot, branch, title, body string, _ []string) (string, error) {
 	f.calls = append(f.calls, prOpenCall{repoRoot, branch, title, body})
 	return f.url, f.err
 }
@@ -47,17 +47,30 @@ const releaseJSONFixture = `{
   }
 }`
 
-// initRepoWithReleaseJSON creates a temp git repo containing release.json and returns its path.
+// initRepoWithReleaseJSON creates a temp git repo containing release.json and
+// the source Dockerfiles required by CopyDockerfiles, then returns the repo path.
 func initRepoWithReleaseJSON(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	initRepo(t, dir)
+
 	path := filepath.Join(dir, "release.json")
 	if err := os.WriteFile(path, []byte(releaseJSONFixture), 0o644); err != nil {
 		t.Fatalf("write release.json: %v", err)
 	}
-	mustGit(t, dir, "add", "release.json")
-	mustGit(t, dir, "commit", "-m", "add release.json")
+
+	for _, c := range releasedDockerfiles {
+		full := filepath.Join(dir, c.src)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", filepath.Dir(full), err)
+		}
+		if err := os.WriteFile(full, []byte("FROM scratch\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", c.src, err)
+		}
+	}
+
+	mustGit(t, dir, "add", ".")
+	mustGit(t, dir, "commit", "-m", "add release.json and dockerfiles")
 	return dir
 }
 

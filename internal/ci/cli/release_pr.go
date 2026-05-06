@@ -42,19 +42,21 @@ func newReleasePRCmd() *cobra.Command {
 // ghPROpener implements PROpener: branches, commits, pushes, then opens the PR via gh.
 type ghPROpener struct{ dryRun bool }
 
-func (g *ghPROpener) Open(repoRoot, branch, title, body string) (string, error) {
+func (g *ghPROpener) Open(repoRoot, branch, title, body string, filesToStage []string) (string, error) {
 	ctx := context.Background()
 	r := runner.New(g.dryRun, repoRoot)
 
-	for _, args := range [][]string{
-		{"checkout", "-b", branch},
-		{"add", "release.json"},
-		{"commit", "-m", title},
-		{"push", "-f", "-u", "origin", branch},
-	} {
-		if err := r.Exec(ctx, "git", args...); err != nil {
-			return "", fmt.Errorf("git %v: %w", args, err)
-		}
+	if err := r.Exec(ctx, "git", "checkout", "-b", branch); err != nil {
+		return "", fmt.Errorf("git checkout: %w", err)
+	}
+	if err := r.Exec(ctx, "git", append([]string{"add"}, filesToStage...)...); err != nil {
+		return "", fmt.Errorf("git add: %w", err)
+	}
+	if err := r.Exec(ctx, "git", "commit", "-m", title); err != nil {
+		return "", fmt.Errorf("git commit: %w", err)
+	}
+	if err := r.Exec(ctx, "git", "push", "-f", "-u", "origin", branch); err != nil {
+		return "", fmt.Errorf("git push: %w", err)
 	}
 
 	repo, err := repoFromOrigin(r)
